@@ -5,6 +5,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { FontAwesomeIcon } from '@fortawesome/react-native-fontawesome';
 import { faPenToSquare, faUserGroup } from '@fortawesome/free-solid-svg-icons';
 import { Avatar } from 'react-native-elements';
+import { getDatabase, ref, get, child, onValue, onDisconnect, set } from 'firebase/database';
 import { getAuth } from 'firebase/auth';
 import { getFirestore, doc, getDoc, collection, getDocs, query, where, limit, orderBy } from 'firebase/firestore';
 import { app } from '../firebaseConfig';
@@ -21,8 +22,9 @@ const Item = ({ user, auth, onPress }) => (
         paddingVertical: 2.5,
         paddingHorizontal: 5,
       }}>
-        <View>
+        <View style={styles.imageContainer}>
           <Avatar size={48} rounded source={user.profilePicture ? { uri: user.profilePicture } : require('../assets/profilepic.jpg')} />
+          {user.isOnline && <View style={styles.onlineIndicator} />}
         </View>
         <View>
           <Text style={{
@@ -53,6 +55,7 @@ const Item = ({ user, auth, onPress }) => (
 const Chats = () => {
   const [profilePicture, setProfilePicture] = useState('');
   const auth = getAuth(app);
+  const database = getDatabase(app);
   const firestore = getFirestore(app);
   const [userInput, setUserInput] = useState('');
   const [users, setUsers] = useState([]);
@@ -108,11 +111,16 @@ const Chats = () => {
             decryptedMessage = Buffer.from(recentMessageData._sender, 'base64').toString('utf-8');
           }
 
+          const userStatusRef = ref(database, `/status/${doc.id}`);
+          const userStatusSnapshot = await get(userStatusRef);
+          const isOnline = userStatusSnapshot.val()?.state === 'online';
+
           return {
             id: doc.id,
             ...userData,
             recentMessage: decryptedMessage,
             isSentByCurrentUser: recentMessageData.sender === auth.currentUser.uid,
+            isOnline,
           };
         })
       );
@@ -141,6 +149,33 @@ const Chats = () => {
       console.error('Error fetching profile picture: ', error);
     }
   };
+
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (user) {
+      const userStatusDatabaseRef = ref(database, `status/${user.uid}`);
+
+      const isOfflineForDatabase = {
+        state: 'offline',
+        last_changed: new Date().toISOString(), 
+      }
+
+      const isOnlineForDatabase = {
+        state: 'online',
+        last_changed: new Date().toISOString(),
+      }
+
+      onValue(ref(database, '.info/connected'), (snapshot) => {
+        if (snapshot.val() === false) {
+          return;
+        }
+
+        onDisconnect(userStatusDatabaseRef).set(isOfflineForDatabase).then(() => {
+          set(userStatusDatabaseRef, isOnlineForDatabase);
+        });
+      });
+    }
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -424,15 +459,15 @@ const styles = StyleSheet.create({
   // imageContainer: {
   //   position: 'relative',
   // },
-  // onlineIndicator: {
-  //   position: 'absolute',
-  //   right: 1, 
-  //   top: 3, 
-  //   width: 10, 
-  //   height: 10,
-  //   borderRadius: 7.5, 
-  //   backgroundColor: '#00dd00',
-  // },
+  onlineIndicator: {
+    position: 'absolute',
+    right: 1, 
+    bottom: 3, 
+    width: 12.5, 
+    height: 12.5,
+    borderRadius: 7.5, 
+    backgroundColor: '#00dd00',
+  },
 })
 
 export default Chats;

@@ -3,7 +3,7 @@ import 'dotenv/config';
 export default {
   "expo": {
     "name": "Safe on Chat",
-    "slug": "SOC",
+    "slug": "socsysteeemm",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -27,13 +27,24 @@ export default {
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE",
         "INTERNET"
-      ]
+      ],
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-        "@config-plugins/react-native-webrtc",
+      "@config-plugins/react-native-webrtc",
+      [
+        "expo-notifications", {
+          "icon": "./assets/socdark.jpg",
+          "color": "#ffffff",
+          "defaultChannel": "default",
+          "sounds": [
+            "./assets/notif-sound/notif.wav",
+          ]
+        }       
+      ]
     ],
     extra: {
       apiKey: process.env.API_KEY,
@@ -41,12 +52,11 @@ export default {
       projectId: process.env.PROJECT_ID,
       storageBucket: process.env.STORAGE_BUCKET,
       messagingSenderId: process.env.MESSAGING_SENDER_ID,
-      appId:process.env.APP_ID,
+      appId: process.env.APP_ID,
       measurementId: process.env.MEASUREMENT_ID,
       "eas": {
-        "projectId": "cb962146-ee56-48aa-9ec2-15570246637f"
+        "projectId": "82439ae0-c4b7-42bd-94db-91d341f6d613"
       }
     }
-    
-  } 
+  }
 }

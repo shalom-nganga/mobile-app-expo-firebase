@@ -233,7 +233,14 @@ const SearchChat = () => {
               width: '100%',
               height: 2,
             }} />
-          {filteredUsers.length === 0 ? (
+          {userInput === '' ? (
+            <View style={{
+              flex: 1,
+              marginTop: 125,
+            }}>
+              <Text style={styles.temp_text}>Search Contacts.</Text>
+            </View>
+          ) : (filteredUsers.length === 0 ? (
             <View style={{
               flex: 1,
               marginTop: 125,
@@ -248,6 +255,7 @@ const SearchChat = () => {
               keyExtractor={item => item.id}
               style={{ marginTop: 10, paddingBottom: 10 }}
             />
+          )
           )}
         </View>
       </LinearGradient>

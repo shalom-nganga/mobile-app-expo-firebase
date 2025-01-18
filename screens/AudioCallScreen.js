@@ -1,12 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Image, Text, Button, StyleSheet, Pressable } from 'react-native';
 import { mediaDevices, RTCPeerConnection, RTCSessionDescription } from 'react-native-webrtc';
 import io from 'socket.io-client';
 import { FontAwesomeIcon } from '@fortawesome/react-native-fontawesome';
 import { faPhoneSlash, faPhone } from '@fortawesome/free-solid-svg-icons';
+import { sendAudioCallNotification, getPushTokenForUser } from './Notifications';
+import { useFocusEffect } from '@react-navigation/native';
 
 const AudioCallScreen = ({ route, navigation }) => {
-  const { user, username, profilePicture } = route.params;
+  const { user, username, profilePicture, callerInfo } = route.params;
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -14,68 +16,117 @@ const AudioCallScreen = ({ route, navigation }) => {
   const socketRef = useRef(null);
   const pcRef = useRef(null);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (callerInfo) {
+        initializeSocket();
+      }
+    }, [callerInfo])
+  );
+
+
   useEffect(() => {
-    const initializeSocket = () => {
-      const socket = io('https://soc-system-rxo4.onrender.com');
-      socketRef.current = socket;
-
-      socket.on('connect', () => {
-        console.log('Connected to signaling server');
-        setIsConnected(true);
-      });
-
-      socket.on('offer', async (offer) => {
-        console.log('Received offer:', offer);
-        if (!pcRef.current) {
-          pcRef.current = createPeerConnection();
-        }
-        try {
-          await pcRef.current.setRemoteDescription(new RTCSessionDescription(offer));
-          const answer = await pcRef.current.createAnswer();
-          await pcRef.current.setLocalDescription(answer);
-          socket.emit('answer', answer);
-        } catch (error) {
-          console.error('Error handling offer:', error);
-        }
-      });
-
-      socket.on('answer', async (answer) => {
-        console.log('Received answer:', answer);
-        if (pcRef.current) {
-          try {
-            await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
-          } catch (error) {
-            console.error('Error setting remote description:', error);
-          }
-        }
-      });
-
-      socket.on('ice-candidate', async (candidate) => {
-        console.log('Received ICE candidate:', candidate);
-        if (pcRef.current) {
-          try {
-            await pcRef.current.addIceCandidate(candidate);
-          } catch (error) {
-            console.error('Error adding ICE candidate:', error);
-          }
-        }
-      });
-
-      return () => {
-        socket.disconnect();
-        if (pcRef.current) {
-          pcRef.current.close();
-          pcRef.current = null;
-        }
-      };
-    };
-
-    initializeSocket();
+    return () => {
+      endCall();
+    }
   }, []);
+
+  // useEffect(() => {
+  //   return () => {
+  //     socket.disconnect();
+  //     if (socketRef.current) {
+  //       socketRef.current.disconnect();
+  //       socketRef.current = null;
+  //     }
+  //     if (pcRef.current) {
+  //       pcRef.current.close();
+  //       pcRef.current = null;
+  //     }
+  //   };
+  // }, []);
+
+  const initializeSocket = () => {
+    const socket = io('https://soc-thesis.onrender.com');
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      console.log('Connected to signaling server');
+      setIsConnected(true);
+    });
+
+    socket.on('offer', async (offer) => {
+      console.log('Received offer:', offer);
+      if (!pcRef.current) {
+        pcRef.current = createPeerConnection();
+      }
+      try {
+        await pcRef.current.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await pcRef.current.createAnswer();
+        await pcRef.current.setLocalDescription(answer);
+        socket.emit('answer', answer);
+      } catch (error) {
+        console.error('Error handling offer:', error);
+      }
+    });
+
+    socket.on('answer', async (answer) => {
+      console.log('Received answer:', answer);
+      if (pcRef.current) {
+        try {
+          await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+        } catch (error) {
+          console.error('Error setting remote description:', error);
+        }
+      }
+    });
+
+    socket.on('ice-candidate', async (candidate) => {
+      console.log('Received ICE candidate:', candidate);
+      if (pcRef.current) {
+        try {
+          await pcRef.current.addIceCandidate(candidate);
+        } catch (error) {
+          console.error('Error adding ICE candidate:', error);
+        }
+      }
+    });
+
+    return () => {
+      socket.disconnect();
+      if (pcRef.current) {
+        pcRef.current.close();
+        pcRef.current = null;
+      }
+    };
+  }
 
   const createPeerConnection = () => {
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      iceServers: [
+        {
+          urls: 'stun:stun.l.google.com:19302'
+        },
+        {
+          urls: "turn:asia.relay.metered.ca:80",
+          username: "c1a44fd70f84e2d8ef05b4ac",
+          credential: "XO88wG9Y0hTvj0XD",
+        },
+        {
+          urls: "turn:asia.relay.metered.ca:80?transport=tcp",
+          username: "c1a44fd70f84e2d8ef05b4ac",
+          credential: "XO88wG9Y0hTvj0XD",
+        },
+        {
+          urls: "turn:asia.relay.metered.ca:443",
+          username: "c1a44fd70f84e2d8ef05b4ac",
+          credential: "XO88wG9Y0hTvj0XD",
+        },
+        {
+          urls: "turns:asia.relay.metered.ca:443?transport=tcp",
+          username: "c1a44fd70f84e2d8ef05b4ac",
+          credential: "XO88wG9Y0hTvj0XD",
+        },
+      ],
     });
 
     pc.onicecandidate = (event) => {
@@ -101,6 +152,9 @@ const AudioCallScreen = ({ route, navigation }) => {
   };
 
   const startLocalStream = async () => {
+    if (!socketRef.current) {
+      initializeSocket();
+    }
     try {
       const stream = await mediaDevices.getUserMedia({
         audio: true,
@@ -113,6 +167,11 @@ const AudioCallScreen = ({ route, navigation }) => {
         pcRef.current.addTrack(track, stream);
       });
       setCallStarted(true);
+
+      const recipientPushToken = await getPushTokenForUser(user.uid);
+      if (recipientPushToken) {
+        await sendAudioCallNotification(recipientPushToken, { user, username, profilePicture });
+      }
     } catch (error) {
       console.error('Error starting local stream:', error);
     }
@@ -145,6 +204,12 @@ const AudioCallScreen = ({ route, navigation }) => {
     if (remoteStream) {
       remoteStream.getTracks().forEach(track => track.stop());
       setRemoteStream(null);
+    }
+
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+      socketRef.current = null;
+      setIsConnected(false);
     }
     setCallStarted(false);
   };

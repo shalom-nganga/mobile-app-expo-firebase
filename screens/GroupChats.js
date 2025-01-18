@@ -64,7 +64,7 @@ const GroupChatsScreen = () => {
 
 
   const handleGroupChatPress = (group) => {
-    navigation.navigate('GroupChatScreen', { groupId: group.id, groupName: group.name });
+    navigation.navigate('GroupChatScreen', { groupId: group.id, groupName: group.name, photoURL: group.photoURL }); 
   };
 
   const getRandomColor = () => {
@@ -145,10 +145,20 @@ const GroupChatsScreen = () => {
                   onPress={() => handleGroupChatPress(item)
                   }>
                   <View style={styles.groupChatItem}>
-                    <Avatar rounded title={item.name[0]} size={40} containerStyle={{
+                    {item.photoURL ? (
+                      <Avatar rounded source={{ uri: item.photoURL }} size={40} containerStyle={{
+                        marginRight: 20,
+                      }} />
+                    ) : (
+                      <Avatar rounded title={item.name[0]} size={40} containerStyle={{
+                        backgroundColor: getRandomColor(),
+                        marginRight: 20,
+                      }} />
+                    )}
+                    {/* <Avatar rounded title={item.name[0]} size={40} containerStyle={{
                       backgroundColor: getRandomColor(),
                       marginRight: 20,
-                    }} />
+                    }} /> */}
                     <Text style={styles.groupChatName}>{item.name}</Text>
                   </View>
                 </Pressable>

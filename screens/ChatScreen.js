@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback } from 'react';
-import { BackHandler, Image, Text, View, StyleSheet, Pressable, Linking } from 'react-native';
+import { BackHandler, Image, Text, View, StyleSheet, Pressable, Linking, TouchableOpacity } from 'react-native';
 import { app } from '../firebaseConfig';
+import { getDatabase, ref, onValue } from 'firebase/database';
 import { getAuth } from 'firebase/auth';
 import { getFirestore, collection, addDoc, orderBy, getDoc, doc, updateDoc, setDoc, serverTimestamp, query, onSnapshot, where } from 'firebase/firestore';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { getStorage, uploadBytes, getDownloadURL, ref as sRef } from 'firebase/storage';
 import { useRoute, useNavigation, useIsFocused } from '@react-navigation/native';
 import { FontAwesomeIcon } from '@fortawesome/react-native-fontawesome';
 import { faPaperPlane, faPaperclip, faImage, faVideo, faPhone } from '@fortawesome/free-solid-svg-icons';
 import { Composer, GiftedChat, Bubble, MessageText, InputToolbar, Send, Day } from 'react-native-gifted-chat';
 import { LinearGradient } from 'expo-linear-gradient';
+import { getPushTokenForUser, sendPushNotification } from './Notifications';
 import * as ScreenCapture from 'expo-screen-capture';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
@@ -25,10 +27,13 @@ LogBox.ignoreAllLogs();
 const ChatScreen = () => {
   const navigation = useNavigation();
   const isFocused = useIsFocused();
+  const [isUserOnline, setIsUserOnline] = useState(false);
   const [messages, setMessages] = useState([]);
   const [isTyping, setIsTyping] = useState(false);
   const [publicKey, setPublicKey] = useState('');
   const [privateKey, setPrivateKey] = useState('');
+  const [aesKey, setAesKey] = useState('');
+  const [selectedFileName, setSelectedFileName] = useState(null);
   const auth = getAuth(app);
   const firestore = getFirestore(app);
   const route = useRoute();
@@ -44,13 +49,27 @@ const ChatScreen = () => {
   }
 
   useEffect(() => {
+    const database = getDatabase(app);
+    const userStatusRef = ref(database, 'status/' + user.uid);
+
+    const unsubscribe = onValue(userStatusRef, (snapshot) => {
+      const status = snapshot.val();
+      setIsUserOnline(status?.state === 'online');
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [user.uid]);
+
+  useEffect(() => {
     const fetchKeys = async () => {
       try {
         //! Fetch public key from Firestore
         const publicKeyDoc = await getDoc(doc(firestore, 'users', user.uid));
         if (publicKeyDoc.exists()) {
           setPublicKey(publicKeyDoc.data().publicKey);
-          console.log('Public key fetched successfully', publicKeyDoc.data().publicKey);
+          // console.log('Public key fetched successfully', publicKeyDoc.data().publicKey);
         } else {
           console.error('Public key not found');
         }
@@ -61,7 +80,7 @@ const ChatScreen = () => {
         //! Fetch private key from SecureStore
         const privateKey = await SecureStore.getItemAsync('privateKey');
         if (privateKey) {
-          console.log('Private key fetched successfully', privateKey);
+          // console.log('Private key fetched successfully', privateKey);
           setPrivateKey(privateKey);
         } else {
           console.error('Private key not found');
@@ -105,7 +124,7 @@ const ChatScreen = () => {
 
   useLayoutEffect(() => {
     navigation.setOptions({
-      headerTitle: () => <HeaderWithPicture username={username} profilePicture={profilePicture} />,
+      headerTitle: () => <HeaderWithPicture username={username} profilePicture={profilePicture} isUserOnline={isUserOnline} />,
     });
 
     if (auth.currentUser && user && user.uid) {
@@ -122,19 +141,19 @@ const ChatScreen = () => {
           let decryptedText = '';
           if (data.text && data.aesKey) {
             // try {
-              if (data.user._id !== auth.currentUser.uid) {
-                const decryptedAesKeyBase64 = await RSA.decrypt(data.aesKey, privateKey); //! Decrypt AES key
-                console.log('Decrypted AES key:', decryptedAesKeyBase64); 
-                const decryptedAesKey = Buffer.from(decryptedAesKeyBase64, 'base64').toString('hex'); //!  Convert decrypted AES key to buffer 
-                console.log('Decrypted AES key buffer:', decryptedAesKey); 
-                const decryptedTextBytes = CryptoJS.AES.decrypt(data.text, decryptedAesKey); //! Decrypt text using decrypted AES key
-                console.log('Decrypted text bytes:', decryptedTextBytes); 
-                decryptedText = decryptedTextBytes.toString(CryptoJS.enc.Utf8); //! Convert decrypted text to string
-                console.log('Decrypted text:', decryptedText);
-                console.log('Decryption successful');
-              } else {
-                decryptedText = Buffer.from(data._sender, 'base64').toString('utf8'); //! Convert decrypted AES key to buffer 
-              }
+            if (data.user._id !== auth.currentUser.uid) {
+              const decryptedAesKeyBase64 = await RSA.decrypt(data.aesKey, privateKey); //! Decrypt AES key
+              console.log('Decrypted AES key:', decryptedAesKeyBase64);
+              const decryptedAesKey = Buffer.from(decryptedAesKeyBase64, 'base64').toString('hex'); //!  Convert decrypted AES key to buffer 
+              console.log('Decrypted AES key buffer:', decryptedAesKey);
+              const decryptedTextBytes = CryptoJS.AES.decrypt(data.text, decryptedAesKey); //! Decrypt text using decrypted AES key
+              console.log('Decrypted text bytes:', decryptedTextBytes);
+              decryptedText = decryptedTextBytes.toString(CryptoJS.enc.Utf8); //! Convert decrypted text to string
+              console.log('Decrypted text:', decryptedText);
+              console.log('Decryption successful');
+            } else {
+              decryptedText = Buffer.from(data._sender, 'base64').toString('utf8'); //! Convert decrypted AES key to buffer 
+            }
             // } catch (error) {
             //   console.error('Error decrypting text:', error.message);
             // }
@@ -154,8 +173,8 @@ const ChatScreen = () => {
                 ? (profilePicture || './assets/profilepic.jpg')
                 : user.profilePicture,
             },
-            file: data.file || null,
-            fileType: data.fileType || null,
+            file: data.file || '',
+            fileType: data.fileType || '',
           };
         }));
         setMessages(messagesFirestore);
@@ -186,7 +205,7 @@ const ChatScreen = () => {
     }
   }, [firestore, auth.currentUser, user, participantIds]);
 
-  const onSend = useCallback(async (messages = [], fileURL = null, fileType = null) => {
+  const onSend = useCallback(async (messages = [], fileURL = null, fileType = null, fileName = null) => {
     const message = messages[0];
 
     if (!message || !message._id || !message.createdAt || (!message.text && !fileURL) || !message.user) {
@@ -202,19 +221,43 @@ const ChatScreen = () => {
     }
 
     try {
+      const recipientToken = await getPushTokenForUser(user.uid);
+
+      if (recipientToken) {
+        // const notificationTitle = sender._id === user.uid ? `New message from ${username}` : `New message from ${user.username}`;
+        await sendPushNotification(recipientToken, {
+          // title: notificationTitle,
+          title: "New message sent to you.",
+          body: message.text || `Attachment sent to you.`,
+          data: {
+            screen: 'ChatScreen',
+            userId: auth.currentUser.uid,
+            userName: username,
+            profilePicture: profilePicture || './assets/profilepic.jpg',
+            recipieintId: user.uid,
+            recipientUserName: user.username,
+          },
+        })
+      } else {
+        console.error('Recipient push token not found');
+      }
+
       const aesKey = CryptoJS.lib.WordArray.random(16).toString(); //! Generate random AES key
-      console.log('AES key:', aesKey); 
+      console.log('AES key:', aesKey);
 
       let encryptedText = '';
       if (text) {
         encryptedText = CryptoJS.AES.encrypt(text, aesKey).toString(); //! Encrypt text using AES key
-        console.log('Encrypted text:', encryptedText); 
+        console.log('Encrypted text:', encryptedText);
       }
 
       const aeseKeyBuffer = Buffer.from(aesKey, 'hex'); //! Convert AES key to buffer
       console.log('AES key buffer:', aeseKeyBuffer);
       const encryptedAesKey = await RSA.encrypt(aeseKeyBuffer.toString('base64'), publicKey); //! Encrypt AES key using RSA public key
       console.log('Encrypted AES key:', encryptedAesKey);
+
+      const encryptedFileName = fileName ? CryptoJS.AES.encrypt(fileName, aesKey).toString() : '';
+      console.log('Encrypted file name:', encryptedFileName);
 
       const messageData = {
         _id,
@@ -227,13 +270,19 @@ const ChatScreen = () => {
           avatar: sender._id === auth.currentUser.uid ? (profilePicture || './assets/profilepic.jpg') : user.profilePicture,
         },
         participants: participantIds,
-        file: fileURL || null,
-        fileType: fileType || null,
+        file: fileURL || '',
+        fileType: fileType || '',
+        // fileName: message.fileName,
+        fileName: encryptedFileName,
         _sender: Buffer.from(text, 'utf8').toString('base64'),
       };
 
+      // if (message.fileName) {
+      //   messageData.fileName = encryptedFileName;
+      // }
+
       await addDoc(collection(firestore, 'chats'), messageData);
-      console.log('Message sent successfully!');
+      // console.log('Message sent successfully!');
       await setDoc(doc(firestore, 'typingStatus', participantIds), {
         typing: '',
         lastTyped: serverTimestamp(),
@@ -267,15 +316,17 @@ const ChatScreen = () => {
         quality: 1,
       });
 
-      console.log('Image picker result:', result);
+      // console.log('Image picker result:', result);
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const imageUri = result.assets[0].uri;
-        console.log('Image picked:', imageUri);
+        const fileName = result.assets[0].fileName || 'image.jpg';
+        // console.log('Image picked:', imageUri);
 
         try {
           const fileURL = await uploadFile(imageUri, 'images');
-          console.log('File URL:', fileURL);
+          const encryptedFileURL = CryptoJS.AES.encrypt(fileURL, aesKey).toString(); //! Encrypt file URL using AES key
+          // console.log('File URL:', fileURL);
 
           const message = {
             _id: new Date().getTime().toString(),
@@ -286,13 +337,16 @@ const ChatScreen = () => {
               avatar: profilePicture || './assets/profilepic.jpg',
             },
             text: '',
+            file: encryptedFileURL, //! Encrypted file URL
+            fileName: fileName,
+            fileType: 'image',
           };
-          onSend([message], fileURL, 'image');
+          onSend([message], encryptedFileURL, 'image');
         } catch (uploadError) {
           console.error('Error uploading file:', uploadError);
         }
       } else {
-        console.log('Image picking canceled or assets are missing');
+        // console.log('Image picking canceled or assets are missing');
       }
     } catch (error) {
       console.error('Error picking image:', error);
@@ -301,7 +355,7 @@ const ChatScreen = () => {
 
   const pickDocument = async () => {
     try {
-      console.log('Picking document...');
+      // console.log('Picking document...');
       const result = await DocumentPicker.getDocumentAsync(
         {
           type: '*/*',
@@ -312,11 +366,16 @@ const ChatScreen = () => {
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const fileUri = result.assets[0].uri;
+        const fileName = result.assets[0].name;
+        setSelectedFileName(fileName);
+        console.log('Document picked:', fileUri);
+        console.log('Document name:', fileName);
 
         try {
 
           const fileURL = await uploadFile(fileUri, 'documents');
-          console.log('File URL obtained:', fileURL);
+          const encryptedFileURL = CryptoJS.AES.encrypt(fileURL, aesKey).toString(); //! Encrypt file URL using AES key
+          // console.log('File URL obtained:', fileURL);
           const message = {
             _id: new Date().getTime().toString(),
             createdAt: new Date(),
@@ -326,14 +385,17 @@ const ChatScreen = () => {
               avatar: profilePicture || './assets/profilepic.jpg',
             },
             text: '',
+            file: encryptedFileURL, //! Encrypted file URL
+            fileName: fileName,
+            fileType: 'document',
           };
-          onSend([message], fileURL, 'document');
-          console.log('Document message sent');
+          onSend([message], encryptedFileURL, 'document', fileName);
+          // console.log('Document message sent');
         } catch (uploadError) {
           console.error('Error uploading document:', uploadError);
         }
       } else {
-        console.log('Document picking canceled or assets are missing');
+        // console.log('Document picking canceled or assets are missing');
       }
     } catch (error) {
       console.error('Error picking document:', error);
@@ -342,10 +404,10 @@ const ChatScreen = () => {
 
   const uploadFile = async (uri, fileType) => {
     try {
-      console.log('Fetching file from URI:', uri);
+      // console.log('Fetching file from URI:', uri);
       const response = await fetch(uri);
 
-      console.log('Fetch response status:', response.status);
+      // console.log('Fetch response status:', response.status);
 
       if (!response.ok) {
         throw new Error(`Fetch failed with status: ${response.status}`);
@@ -353,12 +415,12 @@ const ChatScreen = () => {
 
       const blob = await response.blob();
       const storage = getStorage(app);
-      const fileRef = ref(storage, `${fileType}/${new Date().getTime()}_${auth.currentUser.uid}`);
+      const fileRef = sRef(storage, `${fileType}/${new Date().getTime()}_${auth.currentUser.uid}`);
 
       await uploadBytes(fileRef, blob);
       const downloadURL = await getDownloadURL(fileRef);
 
-      console.log('File uploaded successfully, download URL:', downloadURL);
+      // console.log('File uploaded successfully, download URL:', downloadURL);
       return downloadURL;
     } catch (error) {
       console.error('Error in uploadFile:', error);
@@ -366,7 +428,7 @@ const ChatScreen = () => {
     }
   };
 
-  const HeaderWithPicture = ({ username, profilePicture }) => {
+  const HeaderWithPicture = ({ username, profilePicture, isUserOnline }) => {
     return (
       <View style={{
         flexDirection: 'row',
@@ -374,12 +436,15 @@ const ChatScreen = () => {
         width: '100%',
         position: 'relative',
       }}>
-        <Image source={{ uri: profilePicture }} style={{
-          width: 45,
-          height: 45,
-          borderRadius: 25,
-          marginRight: 10,
-        }} />
+        <View style={styles.imageContainer}>
+          <Image source={{ uri: profilePicture }} style={{
+            width: 45,
+            height: 45,
+            borderRadius: 25,
+            marginRight: 10,
+          }} />
+          {isUserOnline && <View style={styles.onlineIndicator} />}
+        </View>
         <Text style={{
           color: '#fff',
           fontSize: 20,
@@ -428,6 +493,44 @@ const ChatScreen = () => {
   };
 
   const CustomBubble = (props) => {
+    const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
+    const MAX_WIDTH = 300;
+    const MAX_HEIGHT = 300;
+
+    const decryptedUri = CryptoJS.AES.decrypt(props.currentMessage.file, aesKey).toString(CryptoJS.enc.Utf8); //! Decrypt file URL using AES key
+
+    let decryptedFileName = '';
+    if (props.currentMessage.fileName) {
+      try {
+        decryptedFileName = CryptoJS.AES.decrypt(props.currentMessage.fileName, aesKey).toString(CryptoJS.enc.Utf8); //! Decrypt file name using AES key
+      } catch (error) {
+        console.error('Error decrypting file name:', error);
+      }
+    }
+
+    useEffect(() => {
+      if (props.currentMessage.fileType === 'image' && decryptedUri) {
+        Image.getSize(decryptedUri, (width, height) => {
+          let newWidth = width;
+          let newHeight = height;
+
+          if (width > MAX_WIDTH || height > MAX_HEIGHT) {
+            const aspectRatio = width / height;
+
+            if (width > height) {
+              newWidth = MAX_WIDTH;
+              newHeight = MAX_WIDTH / aspectRatio;
+            } else {
+              newHeight = MAX_HEIGHT;
+              newWidth = MAX_HEIGHT * aspectRatio;
+            }
+
+          }
+          setImageDimensions({ width: newWidth, height: newHeight });
+        });
+      }
+    }, [decryptedUri]);
+
     return (
       <View>
         <Bubble
@@ -442,22 +545,24 @@ const ChatScreen = () => {
               paddingHorizontal: 5,
             },
           }}
-          renderTime={
-            () => <Text style={[
+          renderTime={() => (
+            <Text style={[
               props.position === 'left' ? styles.timeLeft : styles.timeRight,
               styles.timeText,
-            ]}>{props.currentMessage.createdAt.toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            })}</Text>
-          }
+            ]}>
+              {props.currentMessage.createdAt.toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </Text>
+          )}
         />
         {props.currentMessage.fileType === 'image' && (
           <Image
-            source={{ uri: props.currentMessage.file }}
+            source={{ uri: decryptedUri }}
             style={{
-              width: 200,
-              height: 200,
+              width: imageDimensions.width,
+              height: imageDimensions.height,
               borderRadius: 20,
               marginTop: 5,
             }}
@@ -479,9 +584,9 @@ const ChatScreen = () => {
               fontSize: 16,
               fontFamily: 'TitilliumWeb_400Regular',
             }}
-            onPress={() => Linking.openURL(props.currentMessage.file)}
+            onPress={() => Linking.openURL(decryptedUri)}
           >
-            View Document.
+            {selectedFileName || 'Document'}
           </Text>
         )}
       </View>
@@ -572,7 +677,7 @@ const ChatScreen = () => {
           name: username,
           avatar: profilePicture || './assets/profilepic.jpg',
         }}
-        renderBubble={CustomBubble}
+        renderBubble={props => <CustomBubble {...props} />}
         isTyping={isTyping}
         onInputTextChanged={handleInputTextChanged}
         renderMessageText={CustomMessageText}
@@ -643,6 +748,18 @@ const styles = StyleSheet.create({
   },
   timeRight: {
     color: '#555',
+  },
+  imageContainer: {
+    position: 'relative',
+  },
+  onlineIndicator: {
+    position: 'absolute',
+    right: 8,
+    bottom: 3,
+    width: 12.5,
+    height: 12.5,
+    borderRadius: 7.5,
+    backgroundColor: '#00dd00',
   },
 });
 

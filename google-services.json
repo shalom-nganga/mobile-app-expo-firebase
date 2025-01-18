@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "151656028112",
+    "firebase_url": "https://soc-thesis-default-rtdb.firebaseio.com",
+    "project_id": "soc-thesis",
+    "storage_bucket": "soc-thesis.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:151656028112:android:da09a901c6e7a03c924bd5",
+        "android_client_info": {
+          "package_name": "com.example.SOC"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBeW-3PDBqBpi7IlhlSGIu12By6WVbC9YE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

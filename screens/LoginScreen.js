@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BackHandler, Image, KeyboardAvoidingView, Pressable, Text, TextInput, View, StyleSheet, Platform } from 'react-native';
+import { BackHandler, Image, KeyboardAvoidingView, Pressable, Text, TextInput, View, StyleSheet, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFonts, TitilliumWeb_400Regular, TitilliumWeb_600SemiBold } from '@expo-google-fonts/titillium-web';
 import { useNavigation } from '@react-navigation/native';
@@ -144,6 +144,22 @@ const LoginScreen = () => {
               setPassword(text);
             }}
           />
+          <TouchableOpacity
+            onPress={() => {
+              navigation.navigate('ForgotPassword');
+            }}  
+          >
+            <Text
+              style={{
+                color: '#fff',
+                marginTop: 5,
+                fontFamily: 'TitilliumWeb_600SemiBold',
+                textAlign: 'center',
+              }}
+            >
+              Forgot Password?
+            </Text>
+          </TouchableOpacity>
           {authError ? (
             <Text style={{
               color: authError.includes('Log in successful') ? '#00FF00' : 'red',

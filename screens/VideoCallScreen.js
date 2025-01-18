@@ -1,14 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Image, Text, StyleSheet, Pressable } from 'react-native';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { View, Image, Text, StyleSheet, Pressable, Animated } from 'react-native';
 import { RTCView, mediaDevices, RTCPeerConnection, RTCSessionDescription } from 'react-native-webrtc';
 import io from 'socket.io-client';
 import { app } from '../firebaseConfig';
 import { getFirestore, addDoc, collection } from 'firebase/firestore';
 import { FontAwesomeIcon } from '@fortawesome/react-native-fontawesome';
 import { faPhoneSlash, faPhone, faSync, faMicrophone, faMicrophoneSlash, faVideo, faVideoSlash } from '@fortawesome/free-solid-svg-icons';
+import { sendVideoCallNotification, getPushTokenForUser } from './Notifications';
+import { useFocusEffect } from '@react-navigation/native';
 
 const VideoCallScreen = ({ route, navigation }) => {
-  const { user, profilePicture } = route.params;
+  const { user, profilePicture, callerInfo } = route.params;
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -16,75 +18,162 @@ const VideoCallScreen = ({ route, navigation }) => {
   const [isMicOn, setIsMicOn] = useState(true);
   const [isUsingFrontCamera, setIsUsingFrontCamera] = useState(true);
   const [isCameraOn, setIsCameraOn] = useState(true);
+  const [isCameraOff, setIcCameraOff] = useState(false);
   const socketRef = useRef(null);
   const pcRef = useRef(null);
   const firestore = getFirestore(app);
 
-    const initializeSocket = () => {
-      const socket = io('https://soc-system-rxo4.onrender.com'); //! Change this to your server URL
-      socketRef.current = socket;
+  useFocusEffect(
+    useCallback(() => {
+      if (callerInfo) {
+        initializeSocket();
+      }
+    }, [callerInfo])
+  );
 
-      socket.on('connect', () => {
-        console.log('Connected to signaling server');
-        setIsConnected(true);
-      });
+  const AnimatedPressable = ({ onPress, style, children }) => {
+    const animatedScale = useRef(new Animated.Value(1)).current;
 
-      socket.on('offer', async (offer) => {
-        console.log('Received offer:', offer);
-        if (!pcRef.current) {
-          pcRef.current = createPeerConnection();
-        }
+    const handlePressIn = () => {
+      Animated.spring(animatedScale, {
+        toValue: 0.9,
+        useNativeDriver: true,
+      }).start();
+    }
+
+    const handlePressOut = () => {
+      Animated.spring(animatedScale, {
+        toValue: 1,
+        friction: 3,
+        useNativeDriver: true,
+      }).start();
+
+    }
+    return (
+      <Pressable
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        onPress={onPress}
+      >
+        <Animated.View style={[style, { transform: [{ scale: animatedScale }] }]}>
+          {children}
+        </Animated.View>
+      </Pressable>
+    );
+  }
+
+  const initializeSocket = () => {
+    const socket = io('https://soc-thesis.onrender.com'); //! Change this to your server URL
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      console.log('Connected to signaling server');
+      setIsConnected(true);
+    });
+
+    socket.on('offer', async (offer) => {
+      console.log('Received offer:', offer);
+      if (!pcRef.current) {
+        pcRef.current = createPeerConnection();
+      }
+      try {
+        await pcRef.current.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await pcRef.current.createAnswer();
+        await pcRef.current.setLocalDescription(answer);
+        socket.emit('answer', answer);
+      } catch (error) {
+        console.error('Error handling offer:', error);
+      }
+    });
+
+    socket.on('answer', async (answer) => {
+      console.log('Received answer:', answer);
+      if (pcRef.current) {
         try {
-          await pcRef.current.setRemoteDescription(new RTCSessionDescription(offer));
-          const answer = await pcRef.current.createAnswer();
-          await pcRef.current.setLocalDescription(answer);
-          socket.emit('answer', answer);
+          await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
         } catch (error) {
-          console.error('Error handling offer:', error);
+          console.error('Error setting remote description:', error);
         }
-      });
+      }
+    });
 
-      socket.on('answer', async (answer) => {
-        console.log('Received answer:', answer);
-        if (pcRef.current) {
-          try {
-            await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
-          } catch (error) {
-            console.error('Error setting remote description:', error);
-          }
+    socket.on('ice-candidate', async (candidate) => {
+      console.log('Received ICE candidate:', candidate);
+      if (pcRef.current) {
+        try {
+          await pcRef.current.addIceCandidate(candidate);
+        } catch (error) {
+          console.error('Error adding ICE candidate:', error);
         }
-      });
+      }
+    });
 
-      socket.on('ice-candidate', async (candidate) => {
-        console.log('Received ICE candidate:', candidate);
-        if (pcRef.current) {
-          try {
-            await pcRef.current.addIceCandidate(candidate);
-          } catch (error) {
-            console.error('Error adding ICE candidate:', error);
-          }
-        }
-      });
-
-      return () => {
-        if (socketRef.current) {
-          socketRef.current.disconnect();
-          socketRef.current = null;
-        }
-        if (pcRef.current) {
-          pcRef.current.close();
-          pcRef.current = null;
-        }
-      };
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+      if (pcRef.current) {
+        pcRef.current.close();
+        pcRef.current = null;
+      }
     };
+  };
 
-  useEffect(() => {
-    initializeSocket();
-  }, []);
+  // useEffect(() => {
+  //   initializeSocket();
+  // }, []);
 
   const createPeerConnection = () => {
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      iceServers: [
+        //? Google's public STUN server
+        {
+          urls: 'stun:stun.l.google.com:19302'
+        },
+        //? Metered TURN server
+        {
+          urls: "turn:asia.relay.metered.ca:80",
+          username: "c1a44fd70f84e2d8ef05b4ac",
+          credential: "XO88wG9Y0hTvj0XD",
+        },
+        {
+          urls: "turn:asia.relay.metered.ca:80?transport=tcp",
+          username: "c1a44fd70f84e2d8ef05b4ac",
+          credential: "XO88wG9Y0hTvj0XD",
+        },
+        {
+          urls: "turn:asia.relay.metered.ca:443",
+          username: "c1a44fd70f84e2d8ef05b4ac",
+          credential: "XO88wG9Y0hTvj0XD",
+        },
+        {
+          urls: "turns:asia.relay.metered.ca:443?transport=tcp",
+          username: "c1a44fd70f84e2d8ef05b4ac",
+          credential: "XO88wG9Y0hTvj0XD",
+        },
+        //? Express TURN server
+        // {
+        //   urls: "turn:relay1.expressturn.com:3478",
+        //   username: "efTZHTNKL6IGGB989F",
+        //   credential: "m6nSI98eCzbyLtnL",
+        // },
+      ],
+      //? Xirsys TURN & STUN server
+      // iceServers: [{
+      //   urls: ["stun:hk-turn1.xirsys.com"]
+      // }, {
+      //   username: "bGHJYjqlmBUTCMW8ozG0CX53OGOdiBlM2Lp5LCxKQyE-jqN8z53w1Z5Ba1PcVwRRAAAAAGeEc8JodW50ZXJ4eGlp",
+      //   credential: "2d0185fa-d152-11ef-91de-0242ac120004",
+      //   urls: [
+      //     "turn:hk-turn1.xirsys.com:80?transport=udp",
+      //     "turn:hk-turn1.xirsys.com:3478?transport=udp",
+      //     "turn:hk-turn1.xirsys.com:80?transport=tcp",
+      //     "turn:hk-turn1.xirsys.com:3478?transport=tcp",
+      //     "turns:hk-turn1.xirsys.com:443?transport=tcp",
+      //     "turns:hk-turn1.xirsys.com:5349?transport=tcp"
+      //   ]
+      // }]
     });
 
     pc.onicecandidate = (event) => {
@@ -101,8 +190,9 @@ const VideoCallScreen = ({ route, navigation }) => {
 
     pc.onconnectionstatechange = () => {
       console.log('Connection state changed:', pc.connectionState);
-      if (pc.connectionState === 'closed') {
+      if (pc.connectionState === 'closed' || pc.connectionState === 'failed') {
         console.log('Peer connection is closed');
+        endCall();
       }
     };
 
@@ -130,6 +220,11 @@ const VideoCallScreen = ({ route, navigation }) => {
       });
       setCallStarted(true);
       await saveCallDetails();
+
+      const recipientPushToken = await getPushTokenForUser(user.uid);
+      if (recipientPushToken) {
+        await sendVideoCallNotification(recipientPushToken, user);
+      }
     } catch (error) {
       console.error('Error starting local stream:', error);
     }
@@ -184,11 +279,21 @@ const VideoCallScreen = ({ route, navigation }) => {
     }
     if (socketRef.current) {
       socketRef.current.disconnect();
-      socketRef.current = null; 
+      socketRef.current = null;
       setIsConnected(false);
     }
     setCallStarted(false);
+    setIsMicOn(true);
+    setIsUsingFrontCamera(true);
+    setIsCameraOn(true);
+    setIcCameraOff(false);
   };
+
+  useEffect(() => {
+    return () => {
+      endCall();
+    }
+  }, []);
 
   const toggleMicrophone = () => {
     if (localStream) {
@@ -204,9 +309,24 @@ const VideoCallScreen = ({ route, navigation }) => {
       localStream.getVideoTracks().forEach(track => {
         track.enabled = !track.enabled;
         setIsCameraOn(track.enabled);
+        setIcCameraOff(!track.enabled);
+        console.log('Camera is on:', track.enabled);
+        if (socketRef.current) {
+          socketRef.current.emit('toggle-camera', { isCameraOn: track.enabled });
+        }
       });
     }
   };
+
+  useEffect(() => {
+    if (socketRef.current) {
+      socketRef.current.on('toggle-camera', ({ isCameraOn }) => {
+        console.log('Received camera toggle:', isCameraOn);
+        setIsCameraOn(isCameraOn);
+        setIcCameraOff(!isCameraOn);
+      })
+    }
+  }, []);
 
   const switchCamera = async () => {
     setIsUsingFrontCamera(prevState => !prevState);
@@ -221,7 +341,7 @@ const VideoCallScreen = ({ route, navigation }) => {
         video: {
           facingMode: isUsingFrontCamera ? 'user' : 'environment',
         },
-      }); 
+      });
       setLocalStream(stream);
 
       if (pcRef.current) {
@@ -247,12 +367,18 @@ const VideoCallScreen = ({ route, navigation }) => {
           objectFit="cover"
         />
       )}
+      {isCameraOff && (
+        <View style={styles.blackScreen} />
+      )}
       {remoteStream && (
         <RTCView
           streamURL={remoteStream.toURL()}
           style={styles.rtcView}
           objectFit="cover"
         />
+      )}
+      {isCameraOff && (
+        <View style={styles.blackScreen} />
       )}
       <View style={{
         flexDirection: 'row',
@@ -283,7 +409,7 @@ const VideoCallScreen = ({ route, navigation }) => {
           </View>
         ) : (
           <>
-            <Pressable style={{
+            <AnimatedPressable style={{
               ...styles.button,
               backgroundColor: isMicOn ? '#fff' : '#f44336',
               marginRight: 20,
@@ -291,22 +417,22 @@ const VideoCallScreen = ({ route, navigation }) => {
               onPress={toggleMicrophone}
             >
               <FontAwesomeIcon icon={isMicOn ? faMicrophone : faMicrophoneSlash} size={35} color={isMicOn ? '#f44336' : "#fff"} />
-            </Pressable>
-            <Pressable style={{
+            </AnimatedPressable>
+            <AnimatedPressable style={{
               ...styles.button,
               backgroundColor: '#fff',
               marginRight: 20,
             }} onPress={createOffer}>
               <FontAwesomeIcon icon={faPhone} size={35} color="#00ff66" />
-            </Pressable>
-            <Pressable style={{
+            </AnimatedPressable>
+            <AnimatedPressable style={{
               ...styles.button,
               backgroundColor: '#fff',
               marginRight: 20,
             }} onPress={endCall}>
               <FontAwesomeIcon icon={faPhoneSlash} size={35} color="#f44336" />
-            </Pressable>
-            <Pressable style={{
+            </AnimatedPressable>
+            <AnimatedPressable style={{
               ...styles.button,
               backgroundColor: isCameraOn ? '#fff' : '#f44336',
               marginRight: 20,
@@ -314,13 +440,13 @@ const VideoCallScreen = ({ route, navigation }) => {
               onPress={toggleCameraOnOff}
             >
               <FontAwesomeIcon icon={isCameraOn ? faVideo : faVideoSlash} size={35} color={isCameraOn ? "#f44336" : "#fff"} />
-            </Pressable>
-            <Pressable style={{
+            </AnimatedPressable>
+            <AnimatedPressable style={{
               ...styles.button,
               backgroundColor: '#fff',
             }} onPress={switchCamera}>
               <FontAwesomeIcon icon={faSync} size={35} color="#f44336" />
-            </Pressable>
+            </AnimatedPressable>
           </>
         )}
       </View>
@@ -340,6 +466,16 @@ const styles = StyleSheet.create({
     height: '43%',
     backgroundColor: '#000',
     zIndex: 0,
+  },
+  blackScreen: {
+    position: 'absolute',
+    width: '100%',
+    height: '43%',
+    backgroundColor: '#000',
+    zIndex: 1,
+  },
+  buttonContainer: {
+    margin: 10,
   },
   button: {
     padding: 10,

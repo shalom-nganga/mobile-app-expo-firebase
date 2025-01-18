@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Alert, BackHandler, TouchableOpacity, KeyboardAvoidingView, Image, Pressable, Text, TextInput, View, StyleSheet } from 'react-native';
+import { ToastAndroid, Alert, BackHandler, TouchableOpacity, KeyboardAvoidingView, Image, Pressable, Text, TextInput, View, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFonts, TitilliumWeb_400Regular, TitilliumWeb_600SemiBold } from '@expo-google-fonts/titillium-web';
 import { useNavigation } from '@react-navigation/native';
@@ -7,12 +7,13 @@ import { MaterialCommunityIcons } from 'react-native-vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { ImageProvider, useImage } from './ImageContext';
 import { app } from '../firebaseConfig';
-import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
+import { getAuth, createUserWithEmailAndPassword, sendEmailVerification } from "firebase/auth";
 import { getFirestore, doc, setDoc } from "firebase/firestore";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
+// importing registerForPushNotificationsAsync function from Notifications.js
+import { registerForPushNotificationsAsync } from './Notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-// import QuickCrypto from 'react-native-quick-crypto';
 import RSA from 'react-native-rsa-native';
 
 const RegisterScreen = () => {
@@ -74,7 +75,6 @@ const RegisterScreen = () => {
     const keys = await RSA.generateKeys(2048);
     const { public: publicKey, private: privateKey } = keys;
 
-    // await AsyncStorage.setItem('privateKey', privateKey);
     await SecureStore.setItemAsync('privateKey', privateKey);
     return publicKey;
   }
@@ -117,6 +117,28 @@ const RegisterScreen = () => {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
+      await sendEmailVerification(user);
+      ToastAndroid.show("Email verification sent!", ToastAndroid.SHORT);
+
+      const checkEmailVerified = async () => {
+        await user.reload();
+        return user.emailVerified;
+      }
+
+      let emailVerified = await checkEmailVerified();
+      const maxAttempts = 10;
+      let attempts = 0;
+
+      while (!emailVerified && attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        emailVerified = await checkEmailVerified();
+        attempts++;
+      }
+
+      if (!emailVerified) {
+        throw new Error("Email verification failed. Please try again later.");
+      }
+
       let imageUrl = '';
       if (image) {
         const response = await fetch(image);
@@ -126,6 +148,7 @@ const RegisterScreen = () => {
         imageUrl = await getDownloadURL(storageRef);
       }
 
+      const token = await registerForPushNotificationsAsync(user.uid);
       const publicKey = await generateKeyPair();
 
       const userDoc = doc(firestore, "users", user.uid);
@@ -135,6 +158,7 @@ const RegisterScreen = () => {
         email: email,
         profilePicture: imageUrl,
         publicKey: publicKey,
+        expoPushToken: token,
       });
 
       setAuthError("Account created successfully!");

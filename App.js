@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import * as Notifications from 'expo-notifications';
+import { registerForPushNotificationsAsync } from './screens/Notifications';
 import LoadingScreen from './screens/Loading';
 import Landingpage from './screens/Landingpage';
 import LoginScreen from './screens/LoginScreen';
@@ -15,6 +17,7 @@ import VideoCall from './screens/VideoCallScreen';
 import AudioCall from './screens/AudioCallScreen';
 import CreateGroupChat from './screens/CreateGroupChatScreen';
 import GroupChatScreen from './screens/GroupChatScreen';
+import ForgotPassword from './screens/ForgotPassword';
 import GroupChats from './screens/GroupChats';
 import { useFonts, TitilliumWeb_400Regular, TitilliumWeb_600SemiBold } from '@expo-google-fonts/titillium-web';
 import 'react-native-get-random-values';
@@ -24,6 +27,27 @@ const Stack = createNativeStackNavigator();
 const uuid = uuidv4();
 
 export default function App() {
+  const navigationRef = useRef();
+
+  useEffect(() => {
+    registerForPushNotificationsAsync();
+
+    const subscription = Notifications.addNotificationResponseReceivedListener(response => {
+      const data = response.notification.request.content.data;
+      if (data.type === "videocall") {
+        navigationRef.current?.navigate('VideoCall', { callerInfo: data.callerInfo });
+      } else if (data.type === "audiocall") {
+        navigationRef.current?.navigate('AudioCall', { callerInfo: data.callerInfo });
+      } else if (data.screen === 'GroupChatScreen') {
+        navigationRef.current?.navigate('GroupChatScreen', {
+          groupId: data.groupId,
+          groupName: data.groupName,
+        });
+      } 
+    });
+    return () => subscription.remove();
+  }, []);
+
   let [fontsLoaded, fontError] = useFonts({
     TitilliumWeb_400Regular,
     TitilliumWeb_600SemiBold,
@@ -34,7 +58,7 @@ export default function App() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <Stack.Navigator 
       initialRouteName="Load"
       screenOptions={{
@@ -50,6 +74,7 @@ export default function App() {
         <Stack.Screen name="Load" component={LoadingScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Land" component={Landingpage} options={{ headerShown: false }} />
         <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="ForgotPassword" component={ForgotPassword} options={{ headerShown: false }} />
         <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: false }} />
         <Stack.Screen name="SemiApp" component={SemiApp} options={{ headerShown: false }} />
@@ -104,8 +129,8 @@ export default function App() {
 //? - configure pin for global storage
 
 //! --------------- UNUSED SCREENS / COMPONENTS --------------- //
-// - SettingsScreen.js (Screen)
-// - Header.js (Component)
+//! - SettingsScreen.js (Screen)
+//! - Header.js (Component)
 
 //* ------------------------------ FINAL FEATURES ------------------------------ //
 //* Login (Authentication)
@@ -152,3 +177,10 @@ export default function App() {
 //* Group Chat Screen
 
 //* Log Out
+
+//TODO
+//TODO: - notifications 
+      //? messages
+      //? video / audio calls
+
+//! TBC - issue in register screen and notifications.js (expo push token)
