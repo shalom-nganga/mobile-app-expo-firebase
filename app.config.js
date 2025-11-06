@@ -34,7 +34,9 @@ export default {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "@config-plugins/react-native-webrtc",
+        "expo-font",
+        "expo-secure-store",
+        
       [
         "expo-notifications", {
           "icon": "./assets/socdark.jpg",
