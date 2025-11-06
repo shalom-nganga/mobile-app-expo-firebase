@@ -14,7 +14,8 @@ export default {
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.example.SOC"
     },
     "android": {
       "package": "com.example.SOC",
